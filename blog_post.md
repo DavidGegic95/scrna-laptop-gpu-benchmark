@@ -4,15 +4,23 @@ _Draft outline: aim for 800-1,200 words. Reader: a biologist or student who uses
 with an NVIDIA GPU, and wonders whether it is worth using._
 
 ## 1. The question (1 paragraph)
-- NVIDIA has shown big speedups with rapids-singlecell [link to NVIDIA blog post; mention the hardware it
-  used]. But most students and small labs don't have data-center GPUs.
+- NVIDIA has shown big speedups with rapids-singlecell
+  ([Dicks & Nolet, NVIDIA Technical Blog, June 2023](https://developer.nvidia.com/blog/gpu-accelerated-single-cell-rna-analysis-with-rapids-singlecell/)).
+  Their benchmarks ran on a server with an NVIDIA A100 80 GB GPU (2x AMD EPYC 7543, 500 GB RAM)
+  and on a desktop with an RTX 3090 (AMD Ryzen 9 5950X, 64 GB RAM).
+  On ~90,000 cells the full notebook (excluding decoupler) ran 21x faster on the A100 and 16x faster on the RTX 3090.
+- Both are big machines: the A100 has 80 GB of GPU memory and the RTX 3090 has 24 GB.
+  Many students and small labs have a laptop with an 8 GB GPU instead.
 - So: is the GPU already in your laptop enough to make a difference?
-- Personal angle: at work I migrated scRNA-seq analyses from notebooks into Nextflow pipelines,
-  and [what was slow there].
+- Personal angle: at work I built RNA-seq and siRNA/ASO pipelines in Nextflow and profiled how
+  resource-hungry steps like STAR alignment are on CPUs, [one sentence on why GPU acceleration interests you].
+- Note for the comparison: NVIDIA's notebooks include more steps than mine (e.g. regress-out, Harmony,
+  t-SNE, decoupler), so compare per-step speedups, not just the end-to-end number.
 
 ## 2. Setup (short, honest)
-- Laptop: RTX 5070 Laptop GPU (8 GB) vs. [CPU model] with 16 threads, Windows + WSL2.
-- Dataset: [name, cells, link]. Sizes tested: [10k / 50k / 100k / ...] cells.
+- Laptop: RTX 5070 Laptop GPU (8 GB) vs. Intel Core Ultra 9 275HX (16 threads visible to WSL2), Windows + WSL2.
+- Dataset: NYGC multimodal PBMC (Hao et al. 2021, *Cell*) from CELLxGENE, 161,764 cells.
+  Sizes tested: 10k / 50k / 100k / 161,764 cells.
 - Same workflow and parameters on both sides; link to the repo for the details.
 
 ## 3. Getting it running (new-user experience)

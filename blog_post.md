@@ -42,4 +42,4 @@ with an NVIDIA GPU, and wonders whether it is worth using._
 - When to move to a bigger GPU.
 - Next: GPU-accelerated alignment with Parabricks (`rna_fq2bam` vs. STAR).
 
-_Code and full results: [GitHub repo link]._
+_Code and full results: https://github.com/DavidGegic95/scrna-laptop-gpu-benchmark._

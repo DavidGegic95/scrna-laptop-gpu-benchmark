@@ -169,6 +169,19 @@ which makes the CPU baseline look slower than on a typical workstation.
 **Data:** any `.h5ad` or 10x `.h5` file with raw counts. If the file stores normalized values in `X` and
 raw counts in `.raw` (common for CELLxGENE downloads), the script uses `.raw` automatically.
 
+## Code layout
+
+| File | What it does |
+|---|---|
+| `benchmark.py`, `plot_results.py` | Command-line entry points |
+| `scbench/workflow.py` | The workflow, written once for both backends, with per-step timing |
+| `scbench/backends.py` | CPU (Scanpy) and GPU (rapids-singlecell) backends: which library, and the few backend-specific arguments |
+| `scbench/data.py` | Loads raw counts and published cell types |
+| `scbench/gpu.py` | GPU memory tracking and managed-memory setup |
+| `scbench/results.py` | Cluster agreement (ARI) and the CSV outputs |
+| `scbench/plots.py` | UMAP comparison, timing charts and the Markdown summary |
+| `scbench/cli.py` | Command-line options and the loop over dataset sizes |
+
 ## Write-up
 
 See [`blog_post.md`](blog_post.md).

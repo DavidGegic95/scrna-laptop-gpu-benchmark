@@ -151,7 +151,7 @@ pip install -r requirements.txt
 python benchmark.py --cpu-only --sizes 2000
 
 # Full benchmark (needs an NVIDIA GPU + rapids-singlecell, see below)
-python benchmark.py --data data/<dataset>.h5ad --sizes 10000,50000,100000
+python benchmark.py --data data/nygc_pbmc_161k.h5ad --sizes 10000,50000,100000
 python plot_results.py
 ```
 

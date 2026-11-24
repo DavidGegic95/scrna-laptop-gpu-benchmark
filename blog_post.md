@@ -1,8 +1,5 @@
 # Single-cell analysis on a laptop GPU: what an 8 GB RTX 5070 can (and can't) do with rapids-singlecell
 
-_Draft. Reader: a biologist or student who uses Scanpy, has a laptop with an NVIDIA GPU, and wonders
-whether it is worth using._
-
 ## Is the GPU in your laptop enough?
 
 NVIDIA has shown that [rapids-singlecell](https://rapids-singlecell.readthedocs.io) can speed up
@@ -52,19 +49,33 @@ up at the size you benchmark, or the CPU looks slower than it is.
 
 ## How much code changes?
 
-Almost none. You move the data to the GPU once, then swap `sc` for `rsc`:
+Almost none. On the CPU with Scanpy:
 
 ```python
-import scanpy as sc                    import rapids_singlecell as rsc
+import scanpy as sc
 
-                                       rsc.get.anndata_to_GPU(adata)
-sc.pp.normalize_total(adata)           rsc.pp.normalize_total(adata)
-sc.pp.log1p(adata)                     rsc.pp.log1p(adata)
-sc.pp.highly_variable_genes(adata)     rsc.pp.highly_variable_genes(adata)
-sc.pp.pca(adata)                       rsc.pp.pca(adata)
-sc.pp.neighbors(adata)                 rsc.pp.neighbors(adata)
-sc.tl.umap(adata)                      rsc.tl.umap(adata)
-sc.tl.leiden(adata)                    rsc.tl.leiden(adata)
+sc.pp.normalize_total(adata)
+sc.pp.log1p(adata)
+sc.pp.highly_variable_genes(adata)
+sc.pp.pca(adata)
+sc.pp.neighbors(adata)
+sc.tl.umap(adata)
+sc.tl.leiden(adata)
+```
+
+On the GPU, you move the data to the GPU once, then swap `sc` for `rsc`:
+
+```python
+import rapids_singlecell as rsc
+
+rsc.get.anndata_to_GPU(adata)
+rsc.pp.normalize_total(adata)
+rsc.pp.log1p(adata)
+rsc.pp.highly_variable_genes(adata)
+rsc.pp.pca(adata)
+rsc.pp.neighbors(adata)
+rsc.tl.umap(adata)
+rsc.tl.leiden(adata)
 ```
 
 The result is a normal AnnData object, so plotting and downstream analysis stay the same.
@@ -78,13 +89,13 @@ The result is a normal AnnData object, so plotting and downstream analysis stay 
 | 100,000 | 65.2 | 7.9 | 8.3x |
 | 161,764 | 115.1 | 12.8 | 9.0x |
 
-![Total time](results/total_time.png)
+![Total time](https://raw.githubusercontent.com/DavidGegic95/scrna-laptop-gpu-benchmark/main/results/total_time.png)
 
 The full dataset went from almost two minutes to under 13 seconds. Across two full runs the end-to-end
 speedup ranged from about 8x to 12x. The GPU already paid off at 10,000 cells, so you don't need a huge
 dataset to benefit.
 
-![Per step](results/per_step.png)
+![Per step](https://raw.githubusercontent.com/DavidGegic95/scrna-laptop-gpu-benchmark/main/results/per_step.png)
 
 The per-step picture explains the total:
 
@@ -119,7 +130,7 @@ copies of the matrix.
 
 ## Same biology?
 
-![UMAP comparison](results/umap_161764.png)
+![UMAP comparison](https://raw.githubusercontent.com/DavidGegic95/scrna-laptop-gpu-benchmark/main/results/umap_161764.png)
 
 Both UMAPs are colored by the published cell types, so the colors mean the same thing in both panels.
 The CPU and GPU separate the same populations: B cells, monocytes, NK cells, CD4 and CD8 T cells, and
@@ -127,17 +138,17 @@ dendritic cells.
 
 To put a number on it I used the Adjusted Rand Index (ARI), which is 1.0 when two groupings are
 identical and about 0 when they are random. On the full dataset, the CPU and GPU clusters had an ARI of
-0.80 (0.91 at 10k cells). They are not identical, because the nearest-neighbor search, UMAP and Leiden
-are implemented differently on each side, and small differences add up as datasets grow. What matters
-more is that both recover the published cell types equally well: ARI 0.47 for CPU clusters and 0.50
-for GPU clusters. The GPU doesn't lose biology.
+0.78-0.80 across runs (0.91 at 10k cells). They are not identical, because the nearest-neighbor search,
+UMAP and Leiden are implemented differently on each side, and small differences add up as datasets grow.
+GPU Leiden was also not fully reproducible on the full dataset: with the same graph, one run found 28
+clusters and later runs found 30. What matters more is that both recover the published cell types
+equally well: ARI 0.47 for CPU clusters and 0.49-0.50 for GPU clusters. The GPU doesn't lose biology.
 
 ## Takeaways
 
 - **If you have a laptop with an 8 GB NVIDIA GPU, use it.** A standard Scanpy workflow ran about 9x
   faster on datasets from 10,000 to about 160,000 cells, with only a few lines of code changed.
-- **Move to a bigger GPU** when your dataset grows past roughly 150,000-180,000 cells, or when you add
-  memory-hungry steps like batch correction on large data.
+- **Move to a bigger GPU** when your dataset grows past roughly 150,000-180,000 cells.
 - **Next:** single-cell analysis starts after alignment. I'll look at GPU-accelerated alignment with
   NVIDIA Parabricks (`rna_fq2bam` vs. STAR).
 

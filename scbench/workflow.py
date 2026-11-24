@@ -31,9 +31,15 @@ class StepFailed(RuntimeError):
         self.step = step
 
 
-def run_workflow(adata, backend, params):
+SEED_CHECK_KEY = "leiden_seed1"
+
+
+def run_workflow(adata, backend, params, seed_check=False):
     """Run every step and time it. `adata` is modified (on the GPU: moved to the device), so pass
-    a copy if you still need it. Returns (result AnnData on the host, {step: seconds})."""
+    a copy if you still need it. Returns (result AnnData on the host, {step: seconds}).
+
+    seed_check: also run Leiden with a different seed on the same graph (not timed), stored in
+    obs[SEED_CHECK_KEY]. Shows how much clusters change from Leiden's randomness alone."""
     times = {}
 
     def step(name, fn):
@@ -60,6 +66,9 @@ def run_workflow(adata, backend, params):
     step("neighbors", lambda: pp.neighbors(adata, n_neighbors=p.n_neighbors, n_pcs=p.n_pcs))
     step("umap", lambda: tl.umap(adata))
     step("leiden", lambda: tl.leiden(adata, resolution=p.resolution, random_state=0, **backend.leiden_kwargs))
+    if seed_check:
+        tl.leiden(adata, resolution=p.resolution, random_state=1, key_added=SEED_CHECK_KEY,
+                  **backend.leiden_kwargs)
 
     if backend.to_host:
         backend.to_host(adata)  # not timed: only needed for comparison and plots

@@ -5,9 +5,10 @@ QC metrics -> filtering -> normalize -> log1p -> HVG selection -> scale -> PCA
 -> kNN graph -> UMAP -> Leiden clustering.
 
 Outputs (in --out):
-  timings.csv     one row per (n_cells, backend, step) with wall-clock seconds
-  agreement.csv   Adjusted Rand Index between CPU and GPU Leiden clusters per size
-  gpu_memory.csv  per size: GPU run ok/failed, failing step, peak GPU memory (sampled after each step)
+  timings.csv     one row per (n_cells, repeat, backend, step) with wall-clock seconds
+  agreement.csv   per size and repeat: Adjusted Rand Index between CPU and GPU Leiden clusters, plus
+                  (first repeat) each backend against itself with a different Leiden seed
+  gpu_memory.csv  per size and repeat: GPU run ok/failed, failing step, peak GPU memory
   system.json     hardware/software versions, so the numbers are reproducible
   umap_<n>.png    side-by-side UMAPs (CPU vs GPU) for each size
 """
@@ -36,6 +37,8 @@ def parse_args(argv=None):
     p.add_argument("--sizes", default="10000,50000,100000", help="comma-separated cell counts to subsample")
     p.add_argument("--out", default="results")
     p.add_argument("--cpu-only", action="store_true", help="skip the GPU run (for smoke tests)")
+    p.add_argument("--repeats", type=int, default=1,
+                   help="timed runs per size and backend, on the same cells (CPU and GPU alternate)")
     p.add_argument("--no-warmup", action="store_true")
     p.add_argument("--managed-memory", action="store_true",
                    help="use CUDA managed memory so datasets larger than GPU memory can still run")
@@ -77,44 +80,52 @@ def main(argv=None):
             sub = sc.pp.subsample(full, n_obs=n, random_state=0, copy=True)
         print(f"\n=== {n:,} cells ===")
 
-        cpu_result, cpu_times = run(sub.copy(), cpu, params)
-        tables.add_timings(n, "cpu", cpu_times)
-        print(f"CPU total: {sum(cpu_times.values()):8.2f} s")
+        for rep in range(args.repeats):
+            first, last = rep == 0, rep == args.repeats - 1
+            tag = f"[{rep + 1}/{args.repeats}] " if args.repeats > 1 else ""
+            cpu_result, cpu_times = run(sub.copy(), cpu, params, seed_check=first)
+            tables.add_timings(n, rep, "cpu", cpu_times)
+            print(f"{tag}CPU total: {sum(cpu_times.values()):8.2f} s")
+            if gpu is None:
+                continue
 
-        if gpu is not None:
             memory.reset()
-            try:
-                gpu_result, gpu_times = run(sub, gpu, params)  # last use of `sub`, so no extra copy
+            try:  # the last run may use `sub` itself: no extra copy
+                gpu_result, gpu_times = run(sub if last else sub.copy(), gpu, params, seed_check=first)
             except StepFailed as e:  # typically cupy/rmm out-of-memory errors
                 err = f"{type(e.__cause__).__name__}: {e.__cause__}"
                 print(f"GPU run FAILED at step '{e.step}': {err}")
-                tables.add_gpu_memory(n, memory.peak_gb, failed_step=e.step, error=err[:200])
-                gpu_result = None
-            else:
-                tables.add_gpu_memory(n, memory.peak_gb)
-                tables.add_timings(n, "gpu", gpu_times)
-                print(f"GPU total: {sum(gpu_times.values()):8.2f} s  "
-                      f"(speedup {sum(cpu_times.values()) / sum(gpu_times.values()):.1f}x)")
-            del sub
+                tables.add_gpu_memory(n, rep, memory.peak_gb, failed_step=e.step, error=err[:200])
+                gpu_utils.free_memory_pool()
+                break  # a repeat would fail the same way
+            tables.add_gpu_memory(n, rep, memory.peak_gb)
+            tables.add_timings(n, rep, "gpu", gpu_times)
+            print(f"{tag}GPU total: {sum(gpu_times.values()):8.2f} s  "
+                  f"(speedup {sum(cpu_times.values()) / sum(gpu_times.values()):.1f}x)")
+            if last:
+                del sub
             gc.collect()
             gpu_utils.free_memory_pool()
-            if gpu_result is not None:
-                compare(n, cpu_result, gpu_result, tables, out)
+            compare(n, rep, cpu_result, gpu_result, tables, out, save_files=first)
 
         tables.save()  # after every size, so a crash later keeps what finished
     print(f"\nResults written to {out}/")
 
 
-def run(adata, backend, params):
+def run(adata, backend, params, seed_check=False):
     """Run the workflow and keep only what the comparison needs, so the AnnData is freed on return."""
-    result_adata, times = run_workflow(adata, backend, params)
+    result_adata, times = run_workflow(adata, backend, params, seed_check=seed_check)
     return Clustering.from_adata(result_adata), times
 
 
-def compare(n, cpu_result, gpu_result, tables, out):
+def compare(n, rep, cpu_result, gpu_result, tables, out, save_files):
     row = agreement(cpu_result, gpu_result)
-    tables.add_agreement(n, row)
-    print(f"Cluster agreement (ARI): {row['ari']:.3f}")
+    tables.add_agreement(n, rep, row)
+    baseline = "".join(f", {b.upper()} seed 0 vs 1: {row[f'ari_{b}_seed0_vs_seed1']:.3f}"
+                       for b in ("cpu", "gpu") if f"ari_{b}_seed0_vs_seed1" in row)
+    print(f"Cluster agreement (ARI) CPU vs GPU: {row['ari']:.3f}{baseline}")
+    if not save_files:
+        return
     cpu_result.save(out / f"embedding_cpu_{n}.csv.gz")
     gpu_result.save(out / f"embedding_gpu_{n}.csv.gz")
     plot_umaps(cpu_result, gpu_result, n, out)

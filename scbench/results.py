@@ -6,6 +6,7 @@ import pandas as pd
 from sklearn.metrics import adjusted_rand_score
 
 from .data import LABEL_COLS, SCORE_COL
+from .workflow import SEED_CHECK_KEY
 
 
 @dataclass
@@ -14,11 +15,13 @@ class Clustering:
     leiden: pd.Series
     umap: np.ndarray
     labels: pd.DataFrame  # published annotations; may have no columns
+    leiden_seed1: pd.Series = None  # same graph, different Leiden seed (only if seed_check was on)
 
     @classmethod
     def from_adata(cls, adata):
         labels = adata.obs[[c for c in LABEL_COLS if c in adata.obs.columns]].copy()
-        return cls(adata.obs["leiden"].copy(), np.asarray(adata.obsm["X_umap"]).copy(), labels)
+        seed1 = adata.obs[SEED_CHECK_KEY].copy() if SEED_CHECK_KEY in adata.obs else None
+        return cls(adata.obs["leiden"].copy(), np.asarray(adata.obsm["X_umap"]).copy(), labels, seed1)
 
     def save(self, path):
         """Labels + UMAP coordinates, so plots can be redrawn without rerunning the benchmark."""
@@ -36,6 +39,11 @@ def agreement(cpu, gpu):
            "ari": adjusted_rand_score(cpu.leiden.loc[common], gpu.leiden.loc[common]),
            "clusters_cpu": cpu.leiden.nunique(),
            "clusters_gpu": gpu.leiden.nunique()}
+    # Baseline: agreement of each backend with itself under a different Leiden seed. If CPU vs GPU
+    # is close to this, the CPU-GPU difference is mostly Leiden's randomness, not the GPU.
+    for name, c in (("cpu", cpu), ("gpu", gpu)):
+        if c.leiden_seed1 is not None:
+            row[f"ari_{name}_seed0_vs_seed1"] = adjusted_rand_score(c.leiden, c.leiden_seed1)
     if SCORE_COL in cpu.labels:
         for name, c in (("cpu", cpu), ("gpu", gpu)):
             row[f"ari_{name}_vs_cell_type"] = adjusted_rand_score(c.labels[SCORE_COL].astype(str), c.leiden)
@@ -49,15 +57,16 @@ class ResultTables:
         self.out = out
         self.tables = {"timings": [], "agreement": [], "gpu_memory": []}
 
-    def add_timings(self, n_cells, backend, times):
-        self.tables["timings"] += [{"n_cells": n_cells, "backend": backend, "step": k, "seconds": v}
-                                   for k, v in times.items()]
+    def add_timings(self, n_cells, repeat, backend, times):
+        self.tables["timings"] += [{"n_cells": n_cells, "repeat": repeat, "backend": backend,
+                                    "step": k, "seconds": v} for k, v in times.items()]
 
-    def add_agreement(self, n_cells, row):
-        self.tables["agreement"].append({"n_cells": n_cells, **row})
+    def add_agreement(self, n_cells, repeat, row):
+        self.tables["agreement"].append({"n_cells": n_cells, "repeat": repeat, **row})
 
-    def add_gpu_memory(self, n_cells, peak_gb, failed_step="", error=""):
-        self.tables["gpu_memory"].append({"n_cells": n_cells, "status": "failed" if failed_step else "ok",
+    def add_gpu_memory(self, n_cells, repeat, peak_gb, failed_step="", error=""):
+        self.tables["gpu_memory"].append({"n_cells": n_cells, "repeat": repeat,
+                                          "status": "failed" if failed_step else "ok",
                                           "failed_step": failed_step, "error": error, "peak_gpu_gb": peak_gb})
 
     def save(self):

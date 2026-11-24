@@ -80,32 +80,34 @@ rsc.tl.leiden(adata)
 
 The result is a normal AnnData object, so plotting and downstream analysis stay the same.
 
-## Speed: about 9x faster, from 10k cells up
+## Speed: 9-15x faster, from 10k cells up
+
+Each size ran 5 times on the same cells, alternating CPU and GPU. Times are medians.
 
 | cells | CPU (s) | GPU (s) | speedup |
 |---:|---:|---:|---:|
-| 10,000 | 9.5 | 1.0 | 9.1x |
-| 50,000 | 27.7 | 2.7 | 10.3x |
-| 100,000 | 65.2 | 7.9 | 8.3x |
-| 161,764 | 115.1 | 12.8 | 9.0x |
+| 10,000 | 9.2 | 1.1 | 8.7x |
+| 50,000 | 27.6 | 2.4 | 11.7x |
+| 100,000 | 57.2 | 3.9 | 14.5x |
+| 161,764 | 108.8 | 10.1 | 10.8x |
 
 ![Total time](https://raw.githubusercontent.com/DavidGegic95/scrna-laptop-gpu-benchmark/main/results/total_time.png)
 
-The full dataset went from almost two minutes to under 13 seconds. Across two full runs the end-to-end
-speedup ranged from about 8x to 12x. The GPU already paid off at 10,000 cells, so you don't need a huge
-dataset to benefit.
+The full dataset went from almost two minutes to about 10 seconds. The GPU already paid off at 10,000
+cells, so you don't need a huge dataset to benefit. The speedup peaked at 100,000 cells and dropped at
+full size; more on that in the next section.
 
 ![Per step](https://raw.githubusercontent.com/DavidGegic95/scrna-laptop-gpu-benchmark/main/results/per_step.png)
 
 The per-step picture explains the total:
 
-- **UMAP and PCA** take about 73% of the CPU time and get the biggest gains: 49x and 45x. These are
+- **UMAP and PCA** take about 78% of the CPU time and get the biggest gains: 47x and 53x. These are
   the steps you rerun most when you tune parameters, so this is where the time saved adds up.
-- **QC metrics, normalization and scaling** are 18-55x faster, but they were already quick on the CPU.
+- **QC metrics, normalization and scaling** are 13-49x faster, but they were already quick on the CPU.
 - **kNN graph (4x) and Leiden (2x)** gain much less. At 10,000 cells, Leiden was slower on the GPU
-  (0.35 s vs. 0.11 s).
-- **Copying data to the GPU** is now the largest single GPU cost: about 4 s of the 12.8 s. If you load
-  once and keep the data on the GPU while you explore, you pay it once.
+  (0.42 s vs. 0.11 s).
+- **Leiden and copying data to the GPU** are now the largest GPU costs, about 2 s each of the 10 s.
+  If you load once and keep the data on the GPU while you explore, you pay for the copy once.
 
 ## The 8 GB wall
 
@@ -118,6 +120,10 @@ of 7.0 GB.
 | 50,000 | 2.2 GB |
 | 100,000 | 4.3 GB |
 | 161,764 | 7.0 GB |
+
+It did slow down, though. Going from 100,000 to 161,764 cells (1.6x more), several GPU steps took 5-6x
+longer, which is why the speedup dropped from 14.5x to 10.8x. My guess is that the GPU works harder
+near its memory limit, but I haven't verified that.
 
 Memory grew almost linearly, about 43 MB per 1,000 cells. Extrapolating, about 180,000 cells is the
 ceiling for this workflow on 8 GB. That is an estimate, not a measurement. It also depends on how many
@@ -139,14 +145,20 @@ dendritic cells.
 To put a number on it I used the Adjusted Rand Index (ARI), which is 1.0 when two groupings are
 identical and about 0 when they are random. On the full dataset, the CPU and GPU clusters had an ARI of
 0.78-0.80 across runs (0.91 at 10k cells). They are not identical, because the nearest-neighbor search,
-UMAP and Leiden are implemented differently on each side, and small differences add up as datasets grow.
-GPU Leiden was also not fully reproducible on the full dataset: with the same graph, one run found 28
-clusters and later runs found 30. What matters more is that both recover the published cell types
-equally well: ARI 0.47 for CPU clusters and 0.49-0.50 for GPU clusters. The GPU doesn't lose biology.
+UMAP and Leiden are implemented differently on each side.
+
+Is 0.78 a lot of disagreement? To find out, I reran Leiden on the CPU with only a different random seed,
+on the same graph. CPU against itself scored 0.84-0.92. So much of the CPU-GPU difference is the kind of
+variation Leiden produces anyway; the rest likely comes from the different neighbor graphs. GPU Leiden
+was much less sensitive to the seed (0.93-0.99), though not perfectly reproducible: on the full dataset,
+one run found 28 clusters and later runs 30.
+
+What matters most is that both recover the published cell types equally well: ARI 0.47 for CPU
+clusters and 0.49-0.50 for GPU clusters. The GPU doesn't lose biology.
 
 ## Takeaways
 
-- **If you have a laptop with an 8 GB NVIDIA GPU, use it.** A standard Scanpy workflow ran about 9x
+- **If you have a laptop with an 8 GB NVIDIA GPU, use it.** A standard Scanpy workflow ran 9-15x
   faster on datasets from 10,000 to about 160,000 cells, with only a few lines of code changed.
 - **Move to a bigger GPU** when your dataset grows past roughly 150,000-180,000 cells.
 - **Next:** single-cell analysis starts after alignment. I'll look at GPU-accelerated alignment with

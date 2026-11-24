@@ -6,4 +6,3 @@ __pycache__/
 .ipynb_checkpoints/
 results_smoke/
 results/embedding_*.csv.gz
-results_repeats/

@@ -2,11 +2,12 @@
 
 **What can an 8 GB laptop GPU do with rapids-singlecell?**
 
-**Status:** benchmark done; blog post in progress.
+**Status:** benchmark done; blog post written ([`blog_post.md`](blog_post.md)).
 
 **TL;DR** On a laptop with an RTX 5070 Laptop GPU (8 GB), a standard Scanpy workflow on 161,764 cells
-took **~13 s on the GPU vs. ~115 s on a 16-thread laptop CPU (about 9x faster)**. The whole dataset fit in
-8 GB (peak ~7 GB), and GPU clusters matched the published cell types as well as CPU clusters did.
+took **~10 s on the GPU vs. ~109 s on a 16-thread laptop CPU (about 11x faster; 9-15x across dataset sizes,
+median of 5 runs)**. The whole dataset fit in 8 GB (peak ~7 GB), and GPU clusters matched the published cell
+types as well as CPU clusters did.
 
 NVIDIA has already shown that [rapids-singlecell](https://rapids-singlecell.readthedocs.io) speeds up
 single-cell RNA-seq analysis
@@ -49,46 +50,53 @@ Fairness rules:
 - A warm-up run at the smallest benchmark size (different random cells) first, so one-time compilation is not counted.
 - GPU timings wait for the GPU to finish each step (`cudaDeviceSynchronize`), since GPU work is asynchronous.
 - Copying data to the GPU is timed and included in the GPU total.
+- Each size runs 5 times on the same cells, alternating CPU and GPU, so slow periods (heat, background load)
+  hit both; tables show the median.
 
 ## Results
 
 ### 1. Speed
 
+Median of 5 runs; min-max in parentheses.
+
 | cells | CPU (s) | GPU (s) | speedup |
 |---:|---:|---:|---:|
-| 10,000 | 9.5 | 1.0 | 9.1x |
-| 50,000 | 27.7 | 2.7 | 10.3x |
-| 100,000 | 65.2 | 7.9 | 8.3x |
-| 161,764 | 115.1 | 12.8 | 9.0x |
-
-Single run shown; across two full runs, end-to-end speedups ranged from about 8x to 12x.
+| 10,000 | 9.2 (9.0-9.8) | 1.1 (1.0-1.1) | 8.7x |
+| 50,000 | 27.6 (26.9-27.9) | 2.4 (2.3-2.5) | 11.7x |
+| 100,000 | 57.2 (55.2-63.0) | 3.9 (3.7-4.7) | 14.5x |
+| 161,764 | 108.8 (104.2-137.1) | 10.1 (9.4-19.4) | 10.8x |
 
 ![Total time](results/total_time.png)
 
-Where the time goes at 161,764 cells:
+Where the time goes at 161,764 cells (median of 5 runs):
 
 | step | CPU (s) | GPU (s) | speedup |
 |---|---:|---:|---:|
-| copy to GPU | - | 4.04 | - |
-| QC metrics | 3.42 | 0.07 | 52x |
-| filter | 5.05 | 1.19 | 4x |
-| normalize | 0.49 | 0.01 | 55x |
-| log1p | 0.85 | 0.96 | 0.9x |
-| highly variable genes | 10.39 | 1.13 | 9x |
-| scale | 1.35 | 0.08 | 18x |
-| PCA | 23.49 | 0.53 | 45x |
-| kNN graph | 5.37 | 1.37 | 4x |
-| UMAP | 60.42 | 1.24 | 49x |
-| Leiden | 4.28 | 2.18 | 2x |
+| copy to GPU | - | 1.95 | - |
+| QC metrics | 2.60 | 0.05 | 49x |
+| filter | 3.90 | 1.04 | 4x |
+| normalize | 0.46 | 0.01 | 47x |
+| log1p | 0.83 | 0.63 | 1.3x |
+| highly variable genes | 4.08 | 1.03 | 4x |
+| scale | 1.00 | 0.08 | 13x |
+| PCA | 27.55 | 0.52 | 53x |
+| kNN graph | 6.14 | 1.38 | 4x |
+| UMAP | 57.17 | 1.22 | 47x |
+| Leiden | 4.27 | 2.11 | 2x |
 
 ![Per step](results/per_step.png)
 
 Observations:
-- **UMAP and PCA dominate on the CPU** (~73% of CPU time) and get the biggest GPU speedups (~45-50x).
-- **Copying data to the GPU is now the largest single GPU cost** (~4 s of ~13 s). Loading data straight
-  onto the GPU, or keeping it there across analyses, would matter more than faster kernels.
-- **Leiden barely benefits on a laptop**, and at 10k cells it was slower on the GPU (0.35 s vs. 0.11 s).
-- The full table for every size is in `results/timings.csv`.
+- **UMAP and PCA dominate on the CPU** (~78% of CPU time) and get the biggest GPU speedups (~47-53x).
+- **Leiden and the copy to the GPU are now the largest GPU costs** (~2 s each of ~10 s). Loading data
+  straight onto the GPU, or keeping it there across analyses, would matter more than faster kernels.
+  The copy also varied most between runs (1.3-11.3 s).
+- **Leiden barely benefits on a laptop**: 2x at full size, and at 10k cells it was slower on the GPU
+  (0.42 s vs. 0.11 s).
+- **The speedup peaks at 100k cells and drops at full size.** Going from 100k to 161k cells (1.6x more),
+  several GPU steps took 5-6x longer (HVG 0.17 to 1.03 s, log1p 0.10 to 0.63 s), while peak GPU memory
+  reached 7 of 8 GB. A likely cause is the GPU running close to its memory limit; this is not verified.
+- The full table for every size and run is in `results/timings.csv`.
 
 ### 2. How far does 8 GB go?
 
@@ -112,17 +120,25 @@ CUDA spill to system RAM (not yet benchmarked here).
 Both UMAPs are colored by the **published** cell types (not by our clusters), so the colors are directly
 comparable: the CPU and GPU separate the same populations (B cells, monocytes, NK cells, CD4/CD8 T cells, DCs).
 
-| cells | ARI CPU vs. GPU clusters | ARI CPU clusters vs. published types | ARI GPU clusters vs. published types |
-|---:|---:|---:|---:|
-| 10,000 | 0.91 | 0.52 | 0.52 |
-| 50,000 | 0.87 | 0.52 | 0.50 |
-| 100,000 | 0.84 | 0.48 | 0.53 |
-| 161,764 | 0.80 | 0.47 | 0.50 |
+| cells | CPU vs. GPU | CPU vs. CPU, other Leiden seed | GPU vs. GPU, other Leiden seed | CPU vs. published types | GPU vs. published types |
+|---:|---:|---:|---:|---:|---:|
+| 10,000 | 0.91 | 0.87 | 0.96 | 0.52 | 0.52 |
+| 50,000 | 0.87 | 0.92 | 0.99 | 0.52 | 0.50 |
+| 100,000 | 0.84 | 0.88 | 0.93 | 0.48 | 0.53 |
+| 161,764 | 0.78 | 0.84 | 0.97 | 0.47 | 0.49 |
 
-ARI (Adjusted Rand Index) is 1.0 for identical groupings and ~0 for random ones. The CPU and GPU clusters are
-not identical, because the kNN search, UMAP and Leiden implementations differ. They recover the published cell types
-**equally well**, so the GPU does not lose biology. (The ARI against published types is moderate for both,
-because Leiden at resolution 1.0 splits cells into a different number of groups than the 30 annotated types.)
+All values are Adjusted Rand Index (ARI): 1.0 for identical groupings, ~0 for random ones.
+
+- **CPU and GPU clusters are not identical**, because the kNN search, UMAP and Leiden implementations differ.
+- **Much of that difference is within Leiden's own randomness.** Rerunning CPU Leiden on the same graph with
+  only a different seed already gives an ARI of 0.84-0.92. At 10k cells, CPU and GPU agree more than CPU
+  agrees with itself; from 50k cells, CPU vs. GPU is 0.04-0.06 below the CPU seed baseline, which likely
+  comes from the different kNN graphs (the seed baseline keeps the graph fixed).
+- **GPU Leiden is much less seed-sensitive** (0.93-0.99), though not fully reproducible: on the same graph,
+  an earlier run at full size found 28 clusters and later runs 30 (CPU vs. GPU ARI 0.80 vs. 0.78).
+- **Both recover the published cell types equally well**, so the GPU does not lose biology. (The ARI against
+  published types is moderate for both, because Leiden at resolution 1.0 splits cells into a different number
+  of groups than the 30 annotated types.)
 
 ## New-user notes
 
@@ -151,7 +167,7 @@ pip install -r requirements.txt
 python benchmark.py --cpu-only --sizes 2000
 
 # Full benchmark (needs an NVIDIA GPU + rapids-singlecell, see below)
-python benchmark.py --data data/nygc_pbmc_161k.h5ad --sizes 10000,50000,100000
+python benchmark.py --data data/nygc_pbmc_161k.h5ad --sizes 10000,50000,100000,161764 --repeats 5
 python plot_results.py
 ```
 

@@ -1,0 +1,9 @@
+# CPU side (always needed)
+scanpy[leiden]>=1.10
+scikit-learn
+matplotlib
+pandas
+# GPU side: install separately. The prebuilt CUDA 12 package worked here (Python 3.12):
+#   pip install 'rapids-singlecell-cu12[rapids]' --extra-index-url=https://pypi.nvidia.com
+# (plain `rapids-singlecell` is source-only and needs a C++/CUDA compiler to build.)
+# Install guide: https://rapids-singlecell.readthedocs.io/en/latest/Installation.html

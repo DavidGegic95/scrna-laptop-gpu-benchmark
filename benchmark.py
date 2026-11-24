@@ -13,6 +13,7 @@ Outputs (in --out):
   umap_<n>.png    side-by-side UMAPs (CPU vs GPU) for each size
 """
 import argparse
+import gc
 import json
 import os
 import platform
@@ -25,32 +26,58 @@ import pandas as pd
 import scanpy as sc
 from scipy import sparse
 
+# Published annotations, if the file has them: broad labels for coloring plots,
+# detailed labels to score how well each backend's clusters recover known cell types.
+COLOR_COL, SCORE_COL = "celltype.l1", "cell_type"
+LABEL_COLS = [COLOR_COL, SCORE_COL]
+
 STEPS = ["to_gpu", "qc_metrics", "filter", "normalize", "log1p", "hvg",
          "scale", "pca", "neighbors", "umap", "leiden"]
 
 
 # --------------------------------------------------------------------------- data
-def gene_symbols(adata):
+def gene_symbols(var):
     """CELLxGENE files use Ensembl IDs as var_names and keep symbols in a column."""
     for col in ("feature_name", "gene_symbols", "gene_symbol", "gene_name"):
-        if col in adata.var:
-            return adata.var[col].astype(str)
-    return pd.Series(adata.var_names, index=adata.var_names)
+        if col in var:
+            return var[col].astype(str)
+    return pd.Series(var.index, index=var.index)
+
+
+def read_h5ad_counts(path):
+    """Read only the raw count matrix from an .h5ad, without loading normalized X or embeddings.
+    CELLxGENE files keep normalized values in X and raw counts in raw/X; loading both doubles RAM use."""
+    import h5py
+    from anndata.io import read_elem
+    with h5py.File(path, "r") as f:
+        main_var = read_elem(f["var"])
+        obs = read_elem(f["obs"])
+        labels = obs[[c for c in LABEL_COLS if c in obs]]
+        if "raw" in f:
+            print("Using raw counts from adata.raw")
+            X, var = read_elem(f["raw/X"]), read_elem(f["raw/var"])
+        else:
+            X, var = read_elem(f["X"]), main_var
+    return X, obs.index, var.index, gene_symbols(main_var), labels
 
 
 def load_counts(path):
     if path is None:
         print("No --data given: using the small PBMC 3k demo dataset (smoke test only).")
-        adata = sc.datasets.pbmc3k()
+        a = sc.datasets.pbmc3k()
+        X, obs_names, var_names, symbols = a.X, a.obs_names, a.var_names, gene_symbols(a.var)
+        labels = None
     elif path.endswith(".h5"):
-        adata = sc.read_10x_h5(path)
+        a = sc.read_10x_h5(path)
+        X, obs_names, var_names, symbols = a.X, a.obs_names, a.var_names, gene_symbols(a.var)
+        labels = None
     else:
-        adata = sc.read_h5ad(path)
+        X, obs_names, var_names, symbols, labels = read_h5ad_counts(path)
 
-    symbols = gene_symbols(adata)
-    if adata.raw is not None:  # CELLxGENE: normalized X, raw counts in .raw
-        print("Using raw counts from adata.raw")
-        adata = adata.raw.to_adata()
+    # Keep only the counts: no precomputed results (neighbors, UMAP, PCA...) from the file,
+    # so both backends start from scratch and Scanpy does not pick up a stale graph.
+    obs = labels.copy() if labels is not None else pd.DataFrame(index=obs_names)
+    adata = sc.AnnData(X=X, obs=obs, var=pd.DataFrame(index=var_names))
     symbols = symbols.reindex(adata.var_names).fillna(pd.Series(adata.var_names, index=adata.var_names))
     adata.var["mt"] = symbols.str.upper().str.startswith("MT-").values
     adata.var_names_make_unique()
@@ -70,11 +97,9 @@ def apply_filters(adata, args):
     """Identical filtering logic for both backends (works on CPU and GPU AnnData)."""
     cells = (adata.obs["n_genes_by_counts"] >= args.min_genes) & \
             (adata.obs["pct_counts_mt"] < args.max_pct_mt)
-    adata = adata[cells.values].copy()
-    if "n_cells_by_counts" in adata.var:
-        genes = np.asarray(adata.var["n_cells_by_counts"] >= args.min_cells)
-        adata = adata[:, genes].copy()
-    return adata
+    genes = (np.asarray(adata.var["n_cells_by_counts"] >= args.min_cells)
+             if "n_cells_by_counts" in adata.var else slice(None))
+    return adata[cells.values, genes].copy()  # one copy instead of two (saves RAM on large data)
 
 
 # ---------------------------------------------------------------------- pipelines
@@ -189,19 +214,51 @@ def system_info(use_gpu):
     return info
 
 
+def keep_result(adata):
+    """Keep only what the comparison needs, so the full AnnData can be freed before the next run."""
+    r = {"leiden": adata.obs["leiden"].copy(), "umap": np.asarray(adata.obsm["X_umap"]).copy()}
+    for col in LABEL_COLS:
+        if col in adata.obs:
+            r[col] = adata.obs[col].copy()
+    return r
+
+
+def save_result(r, path):
+    """Save labels + UMAP coordinates so plots can be redrawn without rerunning the benchmark."""
+    df = pd.DataFrame(r["umap"], columns=["umap1", "umap2"], index=r["leiden"].index)
+    for k, v in r.items():
+        if k != "umap":
+            df[k] = v.astype(str).values
+    df.to_csv(path, compression="gzip")
+
+
 def plot_umaps(cpu, gpu, n, out):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
-    for ax, a, title in ((axes[0], cpu, "CPU (Scanpy)"), (axes[1], gpu, "GPU (rapids-singlecell)")):
-        xy = np.asarray(a.obsm["X_umap"])
-        codes = a.obs["leiden"].astype("category").cat.codes
-        ax.scatter(xy[:, 0], xy[:, 1], c=codes, s=0.5, cmap="tab20", rasterized=True)
-        ax.set_title(f"{title}: {a.obs['leiden'].nunique()} clusters")
+    # Color both panels by the SAME labels: the published cell types if available, otherwise the CPU
+    # clusters. (Coloring each panel by its own cluster numbers would make the colors incomparable.)
+    if COLOR_COL in cpu:
+        labels, legend_title = cpu[COLOR_COL], "published cell type"
+    else:
+        labels, legend_title = cpu["leiden"], "CPU cluster"
+    cats = sorted(labels.astype(str).unique())
+    cmap = plt.get_cmap("tab10" if len(cats) <= 10 else "tab20")
+    colors = {c: cmap(i % cmap.N) for i, c in enumerate(cats)}
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    for ax, r, title in ((axes[0], cpu, "CPU (Scanpy)"), (axes[1], gpu, "GPU (rapids-singlecell)")):
+        lab = labels.reindex(r["leiden"].index).astype(str)
+        xy = r["umap"]
+        ax.scatter(xy[:, 0], xy[:, 1], c=[colors.get(l, (0.8, 0.8, 0.8, 1)) for l in lab],
+                   s=0.3, rasterized=True)
+        ax.set_title(f"{title}: {r['leiden'].nunique()} Leiden clusters")
         ax.set_xticks([]); ax.set_yticks([])
-    fig.suptitle(f"{n:,} cells")
-    fig.tight_layout()
+    if len(cats) <= 20:
+        handles = [plt.Line2D([], [], marker="o", ls="", color=colors[c], label=c) for c in cats]
+        fig.legend(handles=handles, title=legend_title, loc="center right", fontsize=8, title_fontsize=9)
+        fig.subplots_adjust(right=0.82)
+    fig.suptitle(f"{n:,} cells, colored by {legend_title}")
     fig.savefig(out / f"umap_{n}.png", dpi=150)
     plt.close(fig)
 
@@ -242,17 +299,24 @@ def main():
 
     if not args.no_warmup:  # first calls include JIT/kernel compilation; keep that out of the timings
         print("Warm-up run (not recorded)...")
-        warm = sc.pp.subsample(full, n_obs=min(2000, full.n_obs), random_state=1, copy=True)
+        warm = sc.pp.subsample(full, n_obs=min(max(min(sizes), 8000), full.n_obs), random_state=1, copy=True)
         run_cpu(warm.copy(), args)
         if use_gpu:
             run_gpu(warm.copy(), args, {})
             free_gpu_pool()
 
     rows, agreement, memory = [], [], []
+    sizes = sorted(sizes)
     for n in sizes:
-        sub = sc.pp.subsample(full, n_obs=n, random_state=0, copy=True)
+        if n == full.n_obs and n == sizes[-1]:
+            sub, full = full, None  # whole dataset, last run: reuse it instead of copying
+        else:
+            sub = sc.pp.subsample(full, n_obs=n, random_state=0, copy=True)
         print(f"\n=== {n:,} cells ===")
-        cpu, t_cpu = run_cpu(sub.copy(), args)
+        cpu_adata, t_cpu = run_cpu(sub.copy(), args)
+        cpu = keep_result(cpu_adata)
+        del cpu_adata
+        gc.collect()
         rows += [{"n_cells": n, "backend": "cpu", "step": k, "seconds": v} for k, v in t_cpu.items()]
         print(f"CPU total: {sum(t_cpu.values()):8.2f} s")
         if not use_gpu:
@@ -260,7 +324,10 @@ def main():
         t_gpu = {}
         reset_gpu_peak()
         try:
-            gpu, _ = run_gpu(sub.copy(), args, t_gpu)
+            gpu_adata, _ = run_gpu(sub, args, t_gpu)  # last use of `sub`, so no extra copy
+            gpu = keep_result(gpu_adata)
+            del gpu_adata, sub
+            gc.collect()
         except Exception as e:  # typically cupy/rmm out-of-memory errors
             failed = next(s for s in STEPS if s not in t_gpu)
             print(f"GPU run FAILED at step '{failed}': {type(e).__name__}: {e}")
@@ -276,11 +343,17 @@ def main():
         print(f"GPU total: {sum(t_gpu.values()):8.2f} s  "
               f"(speedup {sum(t_cpu.values()) / sum(t_gpu.values()):.1f}x)")
 
-        common = cpu.obs_names.intersection(gpu.obs_names)
-        ari = adjusted_rand_score(cpu.obs.loc[common, "leiden"], gpu.obs.loc[common, "leiden"])
+        common = cpu["leiden"].index.intersection(gpu["leiden"].index)
+        ari = adjusted_rand_score(cpu["leiden"].loc[common], gpu["leiden"].loc[common])
         agreement.append({"n_cells": n, "cells_compared": len(common), "ari": ari,
-                          "clusters_cpu": cpu.obs["leiden"].nunique(),
-                          "clusters_gpu": gpu.obs["leiden"].nunique()})
+                          "clusters_cpu": cpu["leiden"].nunique(),
+                          "clusters_gpu": gpu["leiden"].nunique()})
+        if SCORE_COL in cpu:  # how well each backend recovers the published cell types
+            for name, r in (("cpu", cpu), ("gpu", gpu)):
+                agreement[-1][f"ari_{name}_vs_cell_type"] = adjusted_rand_score(
+                    r[SCORE_COL].astype(str), r["leiden"])
+        save_result(cpu, out / f"embedding_cpu_{n}.csv.gz")
+        save_result(gpu, out / f"embedding_gpu_{n}.csv.gz")
         print(f"Cluster agreement (ARI): {ari:.3f}")
         plot_umaps(cpu, gpu, n, out)
 

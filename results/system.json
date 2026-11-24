@@ -1,0 +1,12 @@
+{
+  "python": "3.12.16",
+  "platform": "Linux-6.18.33.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+  "cpu": "x86_64",
+  "cpu_cores": 16,
+  "scanpy": "1.12.6",
+  "gpu": "NVIDIA GeForce RTX 5070 Laptop GPU",
+  "gpu_memory_gb": 8.5,
+  "rapids_singlecell": "0.18.1",
+  "cupy": "14.2.0",
+  "managed_memory": false
+}

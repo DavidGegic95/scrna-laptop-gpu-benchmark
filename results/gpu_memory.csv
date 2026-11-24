@@ -1,0 +1,5 @@
+n_cells,status,failed_step,error,peak_gpu_gb
+10000,ok,,,0.43
+50000,ok,,,2.15
+100000,ok,,,4.3
+161764,ok,,,6.95

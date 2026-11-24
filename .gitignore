@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 .ipynb_checkpoints/
 results_smoke/
+results/embedding_*.csv.gz

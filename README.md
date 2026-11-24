@@ -2,8 +2,6 @@
 
 **What can an 8 GB laptop GPU do with rapids-singlecell?**
 
-**Status:** benchmark done; blog post written ([`blog_post.md`](blog_post.md)).
-
 **TL;DR** On a laptop with an RTX 5070 Laptop GPU (8 GB), a standard Scanpy workflow on 161,764 cells
 took **~10 s on the GPU vs. ~109 s on a 16-thread laptop CPU (about 11x faster; 9-15x across dataset sizes,
 median of 5 runs)**. The whole dataset fit in 8 GB (peak ~7 GB), and GPU clusters matched the published cell

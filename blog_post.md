@@ -30,7 +30,7 @@ numbers are not directly comparable. The per-step numbers are.
 ## Getting it running
 
 No CUDA toolkit install was needed. The normal Windows NVIDIA driver is enough: WSL2 picks it up, and
-the pip packages bring their own CUDA libraries. Three things did trip me up:
+the pip packages bring their own CUDA libraries. Three things needed fixing:
 
 1. **Python version.** My system Python (3.14) was too new for RAPIDS. A Python 3.12 environment
    (created with `uv`) worked.
@@ -84,12 +84,6 @@ The result is a normal AnnData object, so plotting and downstream analysis stay 
 
 Each size ran 5 times on the same cells, alternating CPU and GPU. Times are medians.
 
-| cells | CPU (s) | GPU (s) | speedup |
-|---:|---:|---:|---:|
-| 10,000 | 9.2 | 1.1 | 8.7x |
-| 50,000 | 27.6 | 2.4 | 11.7x |
-| 100,000 | 57.2 | 3.9 | 14.5x |
-| 161,764 | 108.8 | 10.1 | 10.8x |
 
 ![Total time](https://raw.githubusercontent.com/DavidGegic95/scrna-laptop-gpu-benchmark/main/results/total_time.png)
 

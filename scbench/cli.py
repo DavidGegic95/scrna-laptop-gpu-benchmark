@@ -28,7 +28,7 @@ from .plots import plot_umaps
 from .results import Clustering, ResultTables, agreement
 from .workflow import StepFailed, WorkflowParams, run_workflow
 
-WARMUP_MIN_CELLS = 8000  # smaller warm-ups missed some one-time compilation (see README)
+WARMUP_MIN_CELLS = 10000  # 2k and 8k warm-ups missed some one-time compilation (see README)
 
 
 def parse_args(argv=None):

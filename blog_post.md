@@ -10,7 +10,7 @@ GPU and 16x faster on a desktop RTX 3090. Those are big machines: the A100 has 8
 the RTX 3090 has 24 GB. Many students and small labs have a laptop with an 8 GB GPU instead. So I asked
 a simpler question: is the GPU already in your laptop enough to make a difference?
 
-At work I built RNA-seq and siRNA/ASO pipelines in Nextflow and profiled how resource-hungry steps like
+At work I built RNA-seq in Nextflow and profiled how resource-hungry steps like
 STAR alignment are on CPUs. Watching jobs queue for hours made me curious how much of that time a GPU
 could win back.
 
@@ -127,41 +127,33 @@ near its memory limit, but I haven't verified that.
 
 Memory grew almost linearly, about 43 MB per 1,000 cells. Extrapolating, about 180,000 cells is the
 ceiling for this workflow on 8 GB. That is an estimate, not a measurement. It also depends on how many
-genes are detected per cell (about 2,200 here). Past that point you have three options: process the
-data in batches, let CUDA spill to system RAM with managed memory (slower, and not benchmarked here),
-or use a bigger GPU in the cloud.
+genes are detected per cell (about 2,200 here).
 
-In my runs, system RAM was as much of a limit as GPU memory. Keep the data sparse and avoid extra
-copies of the matrix.
 
 ## Same biology?
 
 ![UMAP comparison](https://raw.githubusercontent.com/DavidGegic95/scrna-laptop-gpu-benchmark/main/results/umap_161764.png)
 
-Both UMAPs are colored by the published cell types, so the colors mean the same thing in both panels.
-The CPU and GPU separate the same populations: B cells, monocytes, NK cells, CD4 and CD8 T cells, and
-dendritic cells.
+Both UMAPs are colored by the published cell types, and both show the same populations: B cells,
+monocytes, NK cells, CD4 and CD8 T cells, and dendritic cells.
 
-To put a number on it I used the Adjusted Rand Index (ARI), which is 1.0 when two groupings are
-identical and about 0 when they are random. On the full dataset, the CPU and GPU clusters had an ARI of
-0.78-0.80 across runs (0.91 at 10k cells). They are not identical, because the nearest-neighbor search,
-UMAP and Leiden are implemented differently on each side.
+To measure agreement I used the Adjusted Rand Index (ARI): 1.0 means two clusterings are identical, 0
+means they match no better than chance. CPU and GPU clusters scored 0.78-0.80 on the full dataset (0.91
+at 10k cells). They differ because each library implements the neighbor search, UMAP and Leiden
+differently.
 
-Is 0.78 a lot of disagreement? To find out, I reran Leiden on the CPU with only a different random seed,
-on the same graph. CPU against itself scored 0.84-0.92. So much of the CPU-GPU difference is the kind of
-variation Leiden produces anyway; the rest likely comes from the different neighbor graphs. GPU Leiden
-was much less sensitive to the seed (0.93-0.99), though not perfectly reproducible: on the full dataset,
-one run found 28 clusters and later runs 30.
+For scale: Leiden is partly random, so running it twice on the CPU with different seeds gives an ARI of
+only 0.84-0.92. Most of the CPU-GPU gap is this ordinary randomness. The GPU was more consistent with
+itself (0.93-0.99).
 
-What matters most is that both recover the published cell types equally well: ARI 0.47 for CPU
-clusters and 0.49-0.50 for GPU clusters. The GPU doesn't lose biology.
+Most important, both match the published cell types equally well (ARI 0.47 CPU, 0.49-0.50 GPU). These
+scores are well below 1 because the published labels are 30 fine-grained types, annotated with RNA plus
+surface-protein data; RNA-only clusters can't separate all of them. The GPU gives the same biology as
+the CPU.
 
 ## Takeaways
 
 - **If you have a laptop with an 8 GB NVIDIA GPU, use it.** A standard Scanpy workflow ran 9-15x
   faster on datasets from 10,000 to about 160,000 cells, with only a few lines of code changed.
-- **Move to a bigger GPU** when your dataset grows past roughly 150,000-180,000 cells.
-- **Next:** single-cell analysis starts after alignment. I'll look at GPU-accelerated alignment with
-  NVIDIA Parabricks (`rna_fq2bam` vs. STAR).
 
-_Code and full results: https://github.com/DavidGegic95/scrna-laptop-gpu-benchmark._
+Code and full results: https://github.com/DavidGegic95/scrna-laptop-gpu-benchmark

@@ -2,15 +2,19 @@
 
 ## Is the GPU in your laptop enough?
 
+At work I built an RNA-seq pipeline in Nextflow, and some steps, like STAR alignment, ran for hours on
+CPUs. I wanted to know how much of that time a GPU could save. NVIDIA's Parabricks accelerates
+alignment, including STAR, but I'm still waiting for AWS to raise my GPU instance quota. So I started
+with the GPU I already had, the one in my laptop, and a different part of the RNA-seq world: single-cell
+analysis, where RAPIDS already has a GPU toolkit.
+
 NVIDIA has shown that [rapids-singlecell](https://rapids-singlecell.readthedocs.io) can speed up
 single-cell RNA-seq analysis a lot
 ([Dicks & Nolet, NVIDIA Technical Blog, June 2023](https://developer.nvidia.com/blog/gpu-accelerated-single-cell-rna-analysis-with-rapids-singlecell/)).
 On about 90,000 cells, their full notebook (excluding decoupler) ran 21x faster on an A100 80 GB server
 GPU and 16x faster on a desktop RTX 3090. Those are big machines: the A100 has 80 GB of GPU memory and
 the RTX 3090 has 24 GB. Many students and small labs have a laptop with an 8 GB GPU instead. So I asked
-a simpler question: is the GPU already in your laptop enough to make a difference?
-
-At work I built an RNA-seq pipeline in Nextflow and profiled how resource-hungry steps like STAR alignment are on CPUs. Watching jobs queue for hours made me curious how much of that time a GPU could save. NVIDIA's Parabricks accelerates alignment, including STAR, but I'm still waiting for AWS to raise my GPU instance quota. So I started with the GPU I already had: the one in my laptop.
+a simpler question: **is the GPU already in your laptop enough to make a difference?**
 
 ## Setup
 

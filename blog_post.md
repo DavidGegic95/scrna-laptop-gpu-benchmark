@@ -10,9 +10,7 @@ GPU and 16x faster on a desktop RTX 3090. Those are big machines: the A100 has 8
 the RTX 3090 has 24 GB. Many students and small labs have a laptop with an 8 GB GPU instead. So I asked
 a simpler question: is the GPU already in your laptop enough to make a difference?
 
-At work I built RNA-seq in Nextflow and profiled how resource-hungry steps like
-STAR alignment are on CPUs. Watching jobs queue for hours made me curious how much of that time a GPU
-could win back.
+At work I built an RNA-seq pipeline in Nextflow and profiled how resource-hungry steps like STAR alignment are on CPUs. Watching jobs queue for hours made me curious how much of that time a GPU could save. NVIDIA's Parabricks accelerates alignment, including STAR, but I'm still waiting for AWS to raise my GPU instance quota. So I started with the GPU I already had: the one in my laptop.
 
 ## Setup
 

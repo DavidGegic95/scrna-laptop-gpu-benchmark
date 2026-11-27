@@ -1,7 +1,5 @@
 # Single-cell analysis on a laptop GPU: what an 8 GB RTX 5070 can (and can't) do with rapids-singlecell
 
-## Is the GPU in your laptop enough?
-
 At work I built an RNA-seq pipeline in Nextflow, and some steps, like STAR alignment, ran for hours on
 CPUs. I wanted to know how much of that time a GPU could save. NVIDIA's Parabricks accelerates
 alignment, including STAR, but I'm still waiting for AWS to raise my GPU instance quota. So I started
